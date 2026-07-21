@@ -22,7 +22,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison flex libssl-dev make gcc \
-            git zip curl python3 libncurses-dev
+            git zip curl python3 libncurses-dev \
+            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 
       - name: Clone kernel source (4.14.117 base)
         run: git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
@@ -39,6 +40,23 @@ jobs:
           sed -i 's/^CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' "$cfg"
           echo "----- module sig config after patch -----"
           grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG" "$cfg" || true
+
+      - name: Diagnose compiler check (non-fatal)
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          echo "clang: $(clang --version | head -1)"
+          echo "gnu elfedit: $(which aarch64-linux-gnu-elfedit || echo MISSING)"
+          echo "gnu as:      $(which aarch64-linux-gnu-as || echo MISSING)"
+          echo "gnu ld:      $(which aarch64-linux-gnu-ld || echo MISSING)"
+          GCCDIR="$(dirname "$(which aarch64-linux-gnu-elfedit 2>/dev/null || echo /x/x)")"
+          echo "GCC_TOOLCHAIN_DIR=$GCCDIR  GCC_TOOLCHAIN=$(realpath "$GCCDIR/.." 2>/dev/null)"
+          echo "===== reproduce kernel stackprotector cc-option ====="
+          set -x
+          clang --target=aarch64-linux-gnu -no-integrated-as \
+            --gcc-toolchain="$(realpath "$GCCDIR/.." 2>/dev/null)" \
+            --prefix="$GCCDIR/" \
+            -Werror -fstack-protector-strong -c -x c /dev/null -o /tmp/t.o -v \
+            && echo "REPRO-OK" || echo "REPRO-FAILED exit=$?"
 
       - name: Build kernel
         working-directory: kernel

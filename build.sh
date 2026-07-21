@@ -55,6 +55,8 @@ cd kernel
 # host GCC 11+ defaults to -fno-common; 4.14 dtc has duplicate tentative symbols (yylloc)
 HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
 make O=out ARCH=arm64 "$DEFCONFIG"
+# resolve unset symbols to defaults non-interactively (avoid silentoldconfig prompt)
+make O=out ARCH=arm64 HOSTCFLAGS="$HOSTCFLAGS" olddefconfig
 # compile: clang + AOSP gcc as + llvm binutils; link: ld.lld (celtare AOSP tree links as-is)
 make -j"$(nproc)" O=out ARCH=arm64 \
   CC=clang \

@@ -100,6 +100,9 @@ jobs:
           # tentative symbols (yylloc). -fcommon restores merge behavior for host tools.
           HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
           make O=out ARCH=arm64 "$DEFCONFIG"
+          # resolve any new/unset symbols to defaults non-interactively (celtare defconfig
+          # isn't fully resolved -> otherwise silentoldconfig prompts and CI has no stdin)
+          make O=out ARCH=arm64 HOSTCFLAGS="$HOSTCFLAGS" olddefconfig
           # compile: clang(+ccache) + AOSP gcc assembler + llvm binutils; link: ld.lld.
           # celtare is a real AOSP clang+lld tree, so it links as-is (no MODVERSIONS/EFI
           # workarounds needed like the MIUI stock source).

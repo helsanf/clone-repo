@@ -35,22 +35,33 @@ jobs:
             clang
             gcc64
             gcc32
-          key: toolchains-proton13-aospgcc49-v1
+          key: toolchains-proton13-aospgcc49-v2
 
       - name: Clone kernel source (4.14.117 base)
         run: git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
 
       - name: Clone proton-clang (CC) [if not cached]
-        run: '[ -x clang/bin/clang ] || git clone --depth=1 https://github.com/kdrag0n/proton-clang clang'
+        run: |
+          # if cache miss OR restored dir is incomplete/lost exec bits, re-clone fresh.
+          # rm -rf first so `git clone` never hits "destination exists".
+          if [ ! -x clang/bin/clang ]; then
+            rm -rf clang
+            git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+          fi
+          chmod -R +x clang/bin || true
 
       - name: "Clone AOSP GCC 4.9 (GNU as/ld/binutils) [if not cached]"
-        # stock Makefile forces -no-integrated-as; clang needs a GNU `as` that is
-        # aarch64 (not host x86). AOSP GCC 4.9 is the era-matched combo.
+        # clang needs a GNU `as` that is aarch64 (not host x86); AOSP GCC 4.9 is era-matched.
         run: |
-          [ -x gcc64/bin/aarch64-linux-android-as ] || git clone --depth=1 \
-            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 gcc64
-          [ -x gcc32/bin/arm-linux-androideabi-as ] || git clone --depth=1 \
-            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 gcc32
+          if [ ! -x gcc64/bin/aarch64-linux-android-as ]; then
+            rm -rf gcc64
+            git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 gcc64
+          fi
+          if [ ! -x gcc32/bin/arm-linux-androideabi-as ]; then
+            rm -rf gcc32
+            git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 gcc32
+          fi
+          chmod -R +x gcc64/bin gcc32/bin || true
           echo "aarch64 as: $(gcc64/bin/aarch64-linux-android-as --version | head -1)"
 
       # --- object cache; restores latest prefix, saves per-sha (even on failure)

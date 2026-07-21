@@ -25,15 +25,15 @@ fi
 # 2. kernel source (4.14.117 base)
 [ -d kernel ] || git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
 
-# 3a. CC toolchain: proton-clang
-[ -x clang/bin/clang ] || git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+# 3a. CC toolchain: proton-clang (rm+clone if missing/incomplete, avoids "dest exists")
+if [ ! -x clang/bin/clang ]; then rm -rf clang
+  git clone --depth=1 https://github.com/kdrag0n/proton-clang clang; fi
 
-# 3b. GNU binutils: AOSP GCC 4.9 (stock Makefile forces -no-integrated-as; needs
-#     a GNU toolchain whose `as` is aarch64, not host x86)
-[ -x gcc64/bin/aarch64-linux-android-as ] || git clone --depth=1 \
-  https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 gcc64
-[ -x gcc32/bin/arm-linux-androideabi-as ] || git clone --depth=1 \
-  https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 gcc32
+# 3b. GNU binutils: AOSP GCC 4.9 (clang needs an aarch64 GNU `as`, not host x86)
+if [ ! -x gcc64/bin/aarch64-linux-android-as ]; then rm -rf gcc64
+  git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 gcc64; fi
+if [ ! -x gcc32/bin/arm-linux-androideabi-as ]; then rm -rf gcc32
+  git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 gcc32; fi
 
 # 4. patch defconfig
 cfg="kernel/arch/arm64/configs/$DEFCONFIG"

@@ -12,24 +12,20 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 # 0. sanity
 [ "$(uname -s)" = "Linux" ] || { echo "Run on Linux/WSL, not $(uname -s)."; exit 1; }
 
+# NOTE: use an older distro (e.g. Ubuntu 22.04 / glibc 2.35). On newer glibc
+# (DT_RELR/.relr.dyn) proton's LLD fails to link host tools like fixdep.
+
 # 1. deps (Debian/Ubuntu)
 if command -v apt-get >/dev/null; then
   sudo apt-get update
-  sudo apt-get install -y bc bison flex libssl-dev make gcc git zip curl python3 libncurses-dev \
-    zstd binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+  sudo apt-get install -y bc bison flex libssl-dev make gcc git zip curl python3 libncurses-dev
 fi
 
 # 2. kernel source (4.14.117 base)
 [ -d kernel ] || git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
 
-# 3. toolchain (Neutron clang + glibc patch fixes ".relr.dyn" host-link error)
-if [ ! -x clang/bin/clang ]; then
-  mkdir -p clang && ( cd clang
-    curl -LSs "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman" -o antman
-    chmod +x antman
-    ./antman -S
-    ./antman --patch=glibc )
-fi
+# 3. toolchain: proton-clang (clang 13, contemporary to 4.14; bundles GNU binutils)
+[ -x clang/bin/clang ] || git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
 
 # 4. disable module sig force (keep CONFIG_MODULE_SIG=y so signed vendor modules still verify)
 cfg="kernel/arch/arm64/configs/$DEFCONFIG"

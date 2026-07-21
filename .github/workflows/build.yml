@@ -12,7 +12,8 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # ubuntu-22.04: older glibc (no DT_RELR/.relr.dyn) so proton's LLD can link host tools
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout packaging repo
         uses: actions/checkout@v4
@@ -21,20 +22,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison flex libssl-dev make gcc \
-            git zip curl python3 libncurses-dev zstd \
-            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+            git zip curl python3 libncurses-dev
 
       - name: Clone kernel source (4.14.117 base)
         run: git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
 
-      - name: Setup Neutron clang toolchain
-        run: |
-          mkdir -p clang && cd clang
-          curl -LSs "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman" -o antman
-          chmod +x antman
-          ./antman -S                # sync latest Neutron clang
-          ./antman --patch=glibc     # fix "unknown type .relr.dyn" host-link error
-          ./bin/clang --version | head -1
+      - name: Clone proton-clang toolchain
+        # proton-clang (clang 13) is contemporary to kernel 4.14 — accepts its flags.
+        # bundles aarch64-linux-gnu- and arm-linux-gnueabi- binutils (as/ld/elfedit).
+        run: git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
 
       - name: Disable CONFIG_MODULE_SIG_FORCE
         working-directory: kernel

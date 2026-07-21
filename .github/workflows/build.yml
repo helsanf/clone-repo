@@ -40,6 +40,9 @@ jobs:
       - name: Build kernel
         working-directory: kernel
         run: |
+          # empty .scmversion suppresses the trailing "+" from setlocalversion,
+          # so vermagic stays "4.14.117-perf" and matches stock vendor modules
+          : > .scmversion
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           export ARCH=arm64 SUBARCH=arm64
           make O=out ARCH=arm64 "$DEFCONFIG"

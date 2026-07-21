@@ -34,6 +34,8 @@ grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG" "$cfg" || true
 export PATH="$ROOT/clang/bin:$PATH"
 export ARCH=arm64 SUBARCH=arm64
 cd kernel
+# keep vermagic "4.14.117-perf" (no trailing "+") so stock vendor modules match
+: > .scmversion
 make O=out ARCH=arm64 "$DEFCONFIG"
 make -j"$(nproc)" O=out ARCH=arm64 \
   CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \

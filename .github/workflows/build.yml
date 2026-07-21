@@ -30,7 +30,7 @@ jobs:
       - name: Clone proton-clang (CC)
         run: git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
 
-      - name: Clone AOSP GCC 4.9 (GNU binutils: aarch64 as/ld/elfedit)
+      - name: "Clone AOSP GCC 4.9 (GNU binutils - aarch64 as/ld/elfedit)"
         # stock Makefile forces -no-integrated-as; clang needs a GNU toolchain whose
         # `as` is aarch64 (not host x86). AOSP GCC 4.9 is the era-matched combo.
         run: |

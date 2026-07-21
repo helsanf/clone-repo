@@ -21,13 +21,20 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison flex libssl-dev make gcc \
-            git zip curl python3 libncurses-dev
+            git zip curl python3 libncurses-dev zstd \
+            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 
       - name: Clone kernel source (4.14.117 base)
         run: git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
 
-      - name: Clone proton-clang toolchain
-        run: git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+      - name: Setup Neutron clang toolchain
+        run: |
+          mkdir -p clang && cd clang
+          curl -LSs "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman" -o antman
+          chmod +x antman
+          ./antman -S                # sync latest Neutron clang
+          ./antman --patch=glibc     # fix "unknown type .relr.dyn" host-link error
+          ./bin/clang --version | head -1
 
       - name: Disable CONFIG_MODULE_SIG_FORCE
         working-directory: kernel

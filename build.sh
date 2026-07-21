@@ -15,14 +15,21 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 # 1. deps (Debian/Ubuntu)
 if command -v apt-get >/dev/null; then
   sudo apt-get update
-  sudo apt-get install -y bc bison flex libssl-dev make gcc git zip curl python3 libncurses-dev
+  sudo apt-get install -y bc bison flex libssl-dev make gcc git zip curl python3 libncurses-dev \
+    zstd binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 fi
 
 # 2. kernel source (4.14.117 base)
 [ -d kernel ] || git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
 
-# 3. toolchain
-[ -d clang ] || git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+# 3. toolchain (Neutron clang + glibc patch fixes ".relr.dyn" host-link error)
+if [ ! -x clang/bin/clang ]; then
+  mkdir -p clang && ( cd clang
+    curl -LSs "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman" -o antman
+    chmod +x antman
+    ./antman -S
+    ./antman --patch=glibc )
+fi
 
 # 4. disable module sig force (keep CONFIG_MODULE_SIG=y so signed vendor modules still verify)
 cfg="kernel/arch/arm64/configs/$DEFCONFIG"

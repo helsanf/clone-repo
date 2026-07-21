@@ -37,6 +37,9 @@ sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' "$cfg"
 sed -i 's/^CONFIG_EFI=y/# CONFIG_EFI is not set/' "$cfg"
 grep -q '^# CONFIG_EFI is not set$' "$cfg" || echo '# CONFIG_EFI is not set' >> "$cfg"
 grep -q '^CONFIG_MODULE_FORCE_LOAD=y' "$cfg" || echo 'CONFIG_MODULE_FORCE_LOAD=y' >> "$cfg"
+# 32-bit compat vDSO needs a GNU ARM32 assembler that AOSP gcc doesn't expose cleanly;
+# disable it (32-bit apps still run via CONFIG_COMPAT, just no vDSO accel)
+sed -i 's/^CONFIG_COMPAT_VDSO=y/# CONFIG_COMPAT_VDSO is not set/' "$cfg"
 echo "----- config after patch -----"
 grep -E "MODULE_SIG_FORCE|MODVERSIONS|CONFIG_EFI|MODULE_FORCE_LOAD|LOCALVERSION=" "$cfg" || true
 

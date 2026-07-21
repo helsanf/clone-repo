@@ -68,8 +68,12 @@ jobs:
           grep -q '^# CONFIG_EFI is not set$' "$cfg" || echo '# CONFIG_EFI is not set' >> "$cfg"
           # let `insmod -f` load the target .ko despite vermagic/CRC mismatch
           grep -q '^CONFIG_MODULE_FORCE_LOAD=y' "$cfg" || echo 'CONFIG_MODULE_FORCE_LOAD=y' >> "$cfg"
+          # 32-bit compat vDSO needs a GNU ARM32 assembler; AOSP gcc's `as` path isn't
+          # picked up cleanly (clang falls back to its own `as` which rejects -EL).
+          # disable it: 32-bit apps still run (via CONFIG_COMPAT), just no vDSO accel.
+          sed -i 's/^CONFIG_COMPAT_VDSO=y/# CONFIG_COMPAT_VDSO is not set/' "$cfg"
           echo "----- config after patch -----"
-          grep -E "MODULE_SIG_FORCE|MODVERSIONS|CONFIG_EFI|MODULE_FORCE_LOAD|LOCALVERSION=|CPU_MASK" "$cfg" || true
+          grep -E "MODULE_SIG_FORCE|MODVERSIONS|CONFIG_EFI|MODULE_FORCE_LOAD|COMPAT_VDSO|LOCALVERSION=|CPU_MASK" "$cfg" || true
 
       - name: Build kernel
         working-directory: kernel

@@ -22,16 +22,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison flex libssl-dev make gcc \
-            git zip curl python3 libncurses-dev \
-            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+            git zip curl python3 libncurses-dev
 
       - name: Clone kernel source (4.14.117 base)
         run: git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
 
-      - name: Clone proton-clang toolchain
-        # proton-clang (clang 13) is contemporary to kernel 4.14 — accepts its flags.
-        # bundles aarch64-linux-gnu- and arm-linux-gnueabi- binutils (as/ld/elfedit).
+      - name: Clone proton-clang (CC)
         run: git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+
+      - name: Clone AOSP GCC 4.9 (GNU binutils: aarch64 as/ld/elfedit)
+        # stock Makefile forces -no-integrated-as; clang needs a GNU toolchain whose
+        # `as` is aarch64 (not host x86). AOSP GCC 4.9 is the era-matched combo.
+        run: |
+          git clone --depth=1 \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 gcc64
+          git clone --depth=1 \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 gcc32
+          echo "aarch64 as: $(gcc64/bin/aarch64-linux-android-as --version | head -1)"
 
       - name: Disable CONFIG_MODULE_SIG_FORCE
         working-directory: kernel
@@ -41,23 +48,6 @@ jobs:
           echo "----- module sig config after patch -----"
           grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG" "$cfg" || true
 
-      - name: Diagnose compiler check (non-fatal)
-        run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
-          echo "clang: $(clang --version | head -1)"
-          echo "gnu elfedit: $(which aarch64-linux-gnu-elfedit || echo MISSING)"
-          echo "gnu as:      $(which aarch64-linux-gnu-as || echo MISSING)"
-          echo "gnu ld:      $(which aarch64-linux-gnu-ld || echo MISSING)"
-          GCCDIR="$(dirname "$(which aarch64-linux-gnu-elfedit 2>/dev/null || echo /x/x)")"
-          echo "GCC_TOOLCHAIN_DIR=$GCCDIR  GCC_TOOLCHAIN=$(realpath "$GCCDIR/.." 2>/dev/null)"
-          echo "===== reproduce kernel stackprotector cc-option ====="
-          set -x
-          clang --target=aarch64-linux-gnu -no-integrated-as \
-            --gcc-toolchain="$(realpath "$GCCDIR/.." 2>/dev/null)" \
-            --prefix="$GCCDIR/" \
-            -Werror -fstack-protector-strong -c -x c /dev/null -o /tmp/t.o -v \
-            && echo "REPRO-OK" || echo "REPRO-FAILED exit=$?"
-
       - name: Build kernel
         working-directory: kernel
         run: |
@@ -66,13 +56,15 @@ jobs:
           : > .scmversion
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           export ARCH=arm64 SUBARCH=arm64
+          GCC64="$GITHUB_WORKSPACE/gcc64/bin/aarch64-linux-android-"
+          GCC32="$GITHUB_WORKSPACE/gcc32/bin/arm-linux-androideabi-"
           make O=out ARCH=arm64 "$DEFCONFIG"
           make -j"$(nproc)" O=out ARCH=arm64 \
             CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
             OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            CROSS_COMPILE="$GCC64" \
+            CROSS_COMPILE_ARM32="$GCC32" \
             Image.gz-dtb
 
       - name: Package flashable zip (AnyKernel3)

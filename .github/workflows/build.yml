@@ -89,6 +89,10 @@ jobs:
           # legacy in-kernel lowmemorykiller fails to compile under modern clang and is
           # redundant on Android 10 (userspace lmkd handles OOM). disable the driver.
           sed -i 's/^CONFIG_ANDROID_LOW_MEMORY_KILLER=y/# CONFIG_ANDROID_LOW_MEMORY_KILLER is not set/' "$cfg"
+          # tune.c cftype table references *_wrapper funcs gated on CONFIG_STUNE_ASSIST but
+          # calls them unconditionally -> undeclared-identifier build error when it is off.
+          # celtare expects it ON; enable it (deps SCHED_TUNE+ANDROID already satisfied).
+          grep -q '^CONFIG_STUNE_ASSIST=y' "$cfg" || echo 'CONFIG_STUNE_ASSIST=y' >> "$cfg"
           echo "----- config after patch -----"
           grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=|CPU_MASK" "$cfg" || true
 

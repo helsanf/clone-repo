@@ -48,6 +48,8 @@ grep -q '^CONFIG_LITTLE_CPU_MASK=' "$cfg" || echo 'CONFIG_LITTLE_CPU_MASK=15' >>
 grep -q '^CONFIG_BIG_CPU_MASK='    "$cfg" || echo 'CONFIG_BIG_CPU_MASK=240'   >> "$cfg"
 # legacy lowmemorykiller fails under modern clang; redundant on A10 (userspace lmkd)
 sed -i 's/^CONFIG_ANDROID_LOW_MEMORY_KILLER=y/# CONFIG_ANDROID_LOW_MEMORY_KILLER is not set/' "$cfg"
+# tune.c calls *_wrapper funcs gated on CONFIG_STUNE_ASSIST unconditionally -> enable it
+grep -q '^CONFIG_STUNE_ASSIST=y' "$cfg" || echo 'CONFIG_STUNE_ASSIST=y' >> "$cfg"
 echo "----- config after patch -----"
 grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=|CPU_MASK" "$cfg" || true
 

@@ -34,11 +34,15 @@ fi
 [ -x gcc32/bin/arm-linux-androideabi-as ] || git clone --depth=1 \
   https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 gcc32
 
-# 4. disable module sig force (keep CONFIG_MODULE_SIG=y so signed vendor modules still verify)
+# 4. patch defconfig
 cfg="kernel/arch/arm64/configs/$DEFCONFIG"
+# load stock vendor .ko without a trusted signing key
 sed -i 's/^CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' "$cfg"
+# genksyms fails to CRC some msm gsi symbols under clang -> "dangerous relocation".
+# drop MODVERSIONS: load keys off vermagic only (still 4.14.117-perf), CRC skipped.
+sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' "$cfg"
 echo "----- module config after patch -----"
-grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG" "$cfg" || true
+grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG|CONFIG_MODVERSIONS" "$cfg" || true
 
 # 5. build
 export PATH="$ROOT/clang/bin:$PATH"

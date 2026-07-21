@@ -9,6 +9,7 @@ env:
   KERNEL_REPO: https://github.com/MiCode/Xiaomi_Kernel_OpenSource
   KERNEL_BRANCH: ginkgo-q-oss
   DEFCONFIG: vendor/ginkgo-perf_defconfig
+  CCACHE_DIR: /home/runner/.ccache
 
 jobs:
   build:
@@ -22,31 +23,55 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison flex libssl-dev make gcc \
-            git zip curl python3 libncurses-dev
+            git zip curl python3 libncurses-dev ccache
+
+      # --- toolchains cached across runs; clones below are guarded so a cache
+      #     hit skips the multi-GB downloads. static key = same tools every run.
+      - name: Cache toolchains (proton + AOSP gcc)
+        uses: actions/cache@v4
+        with:
+          path: |
+            clang
+            gcc64
+            gcc32
+          key: toolchains-proton13-aospgcc49-v1
 
       - name: Clone kernel source (4.14.117 base)
         run: git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
 
-      - name: Clone proton-clang (CC)
-        run: git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+      - name: Clone proton-clang (CC) [if not cached]
+        run: '[ -x clang/bin/clang ] || git clone --depth=1 https://github.com/kdrag0n/proton-clang clang'
 
-      - name: "Clone AOSP GCC 4.9 (GNU binutils - aarch64 as/ld/elfedit)"
-        # stock Makefile forces -no-integrated-as; clang needs a GNU toolchain whose
-        # `as` is aarch64 (not host x86). AOSP GCC 4.9 is the era-matched combo.
+      - name: "Clone AOSP GCC 4.9 (GNU as/ld/binutils) [if not cached]"
+        # stock Makefile forces -no-integrated-as; clang needs a GNU `as` that is
+        # aarch64 (not host x86). AOSP GCC 4.9 is the era-matched combo.
         run: |
-          git clone --depth=1 \
+          [ -x gcc64/bin/aarch64-linux-android-as ] || git clone --depth=1 \
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 gcc64
-          git clone --depth=1 \
+          [ -x gcc32/bin/arm-linux-androideabi-as ] || git clone --depth=1 \
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 gcc32
           echo "aarch64 as: $(gcc64/bin/aarch64-linux-android-as --version | head -1)"
 
-      - name: Disable CONFIG_MODULE_SIG_FORCE
+      # --- object cache; restores latest prefix, saves per-sha (even on failure)
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-ginkgo-${{ github.sha }}
+          restore-keys: ccache-ginkgo-
+
+      - name: Patch defconfig (SIG_FORCE off, MODVERSIONS off)
         working-directory: kernel
         run: |
           cfg="arch/arm64/configs/$DEFCONFIG"
+          # load stock vendor .ko without a trusted signing key
           sed -i 's/^CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' "$cfg"
-          echo "----- module sig config after patch -----"
-          grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG" "$cfg" || true
+          # genksyms fails to CRC some msm gsi symbols under clang -> "dangerous
+          # relocation" at link. drop MODVERSIONS: module load then keys off vermagic
+          # only (still "4.14.117-perf"), CRC check skipped. source==stock so ABI matches.
+          sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' "$cfg"
+          echo "----- module config after patch -----"
+          grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG|CONFIG_MODVERSIONS" "$cfg" || true
 
       - name: Build kernel
         working-directory: kernel
@@ -56,17 +81,18 @@ jobs:
           : > .scmversion
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           export ARCH=arm64 SUBARCH=arm64
+          export CCACHE_MAXSIZE=3G CCACHE_COMPILERCHECK=content
+          ccache -z >/dev/null 2>&1 || true
           GCC64="$GITHUB_WORKSPACE/gcc64/bin/aarch64-linux-android-"
           GCC32="$GITHUB_WORKSPACE/gcc32/bin/arm-linux-androideabi-"
           # host GCC 11+ defaults to -fno-common; 4.14's bundled dtc has duplicate
           # tentative symbols (yylloc). -fcommon restores merge behavior for host tools.
           HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
           make O=out ARCH=arm64 "$DEFCONFIG"
-          # compile: clang + AOSP gcc assembler + llvm binutils (proven to compile all .o)
-          # link: GNU bfd ld (from proton) instead of ld.lld — lld rejects R_AARCH64_ABS32
-          #       relocs (EFI stub, MODVERSIONS __crc_*) in this 4.14 tree.
+          # compile: clang(+ccache) + AOSP gcc assembler + llvm binutils
+          # link: GNU bfd ld (proton) — lld rejects R_AARCH64_ABS32 in this 4.14 tree
           make -j"$(nproc)" O=out ARCH=arm64 \
-            CC=clang \
+            CC="ccache clang" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE="$GCC64" \
             CROSS_COMPILE_ARM32="$GCC32" \
@@ -74,6 +100,7 @@ jobs:
             AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             HOSTCFLAGS="$HOSTCFLAGS" \
             Image.gz-dtb
+          ccache -s 2>/dev/null | grep -E "cache hit|files in cache" || true
 
       - name: Package flashable zip (AnyKernel3)
         run: |

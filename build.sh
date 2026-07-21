@@ -48,6 +48,8 @@ GCC32="$ROOT/gcc32/bin/arm-linux-androideabi-"
 cd kernel
 # keep vermagic "4.14.117-perf" (no trailing "+") so stock vendor modules match
 : > .scmversion
+# host GCC 11+ defaults to -fno-common; 4.14 dtc has duplicate tentative symbols (yylloc)
+HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
 make O=out ARCH=arm64 "$DEFCONFIG"
 make -j"$(nproc)" O=out ARCH=arm64 \
   CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
@@ -55,6 +57,7 @@ make -j"$(nproc)" O=out ARCH=arm64 \
   CLANG_TRIPLE=aarch64-linux-gnu- \
   CROSS_COMPILE="$GCC64" \
   CROSS_COMPILE_ARM32="$GCC32" \
+  HOSTCFLAGS="$HOSTCFLAGS" \
   Image.gz-dtb
 cd "$ROOT"
 

@@ -86,6 +86,9 @@ jobs:
           # prompt and CI has no stdin. ginkgo SD665: cores 0-3 little (0x0f=15), 4-7 big (0xf0=240).
           grep -q '^CONFIG_LITTLE_CPU_MASK=' "$cfg" || echo 'CONFIG_LITTLE_CPU_MASK=15' >> "$cfg"
           grep -q '^CONFIG_BIG_CPU_MASK='    "$cfg" || echo 'CONFIG_BIG_CPU_MASK=240'   >> "$cfg"
+          # legacy in-kernel lowmemorykiller fails to compile under modern clang and is
+          # redundant on Android 10 (userspace lmkd handles OOM). disable the driver.
+          sed -i 's/^CONFIG_ANDROID_LOW_MEMORY_KILLER=y/# CONFIG_ANDROID_LOW_MEMORY_KILLER is not set/' "$cfg"
           echo "----- config after patch -----"
           grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=|CPU_MASK" "$cfg" || true
 

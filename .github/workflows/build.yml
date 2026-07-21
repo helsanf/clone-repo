@@ -96,6 +96,22 @@ jobs:
           echo "----- config after patch -----"
           grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=|CPU_MASK" "$cfg" || true
 
+      - name: Patch source (dedupe sched_boost_handler under WALT)
+        working-directory: kernel
+        run: |
+          # celtare defines sched_boost_handler in BOTH boost.c (built when SCHED_WALT=y)
+          # and sysctl.c (always) -> ld.lld "duplicate symbol". guard the sysctl.c copy so
+          # it only compiles when WALT is off; the header extern keeps sysctl tables valid.
+          f=kernel/sysctl.c
+          need=$(awk 'p=="#ifndef CONFIG_SCHED_WALT" && /^int sched_boost_handler\(/{print "no";exit} /^int sched_boost_handler\(/{print "yes";exit} {p=$0}' "$f")
+          if [ "$need" = "yes" ]; then
+            awk '/^int sched_boost_handler\(/ && !d{print "#ifndef CONFIG_SCHED_WALT"; i=1} {print} i && /^}/{print "#endif /* CONFIG_SCHED_WALT */"; i=0; d=1}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+            echo "patched: guarded sysctl.c sched_boost_handler"
+          else
+            echo "already guarded, skip"
+          fi
+          grep -n -A1 '^#ifndef CONFIG_SCHED_WALT' "$f" | grep -A1 -B1 sched_boost_handler || true
+
       - name: Build kernel
         working-directory: kernel
         run: |

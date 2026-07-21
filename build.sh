@@ -53,6 +53,15 @@ grep -q '^CONFIG_STUNE_ASSIST=y' "$cfg" || echo 'CONFIG_STUNE_ASSIST=y' >> "$cfg
 echo "----- config after patch -----"
 grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=|CPU_MASK" "$cfg" || true
 
+# 4b. dedupe sched_boost_handler: defined in both boost.c (WALT) and sysctl.c -> ld.lld
+#     duplicate symbol. guard the sysctl.c copy for the WALT-off case only.
+sf="kernel/kernel/sysctl.c"
+need=$(awk 'p=="#ifndef CONFIG_SCHED_WALT" && /^int sched_boost_handler\(/{print "no";exit} /^int sched_boost_handler\(/{print "yes";exit} {p=$0}' "$sf")
+if [ "$need" = "yes" ]; then
+  awk '/^int sched_boost_handler\(/ && !d{print "#ifndef CONFIG_SCHED_WALT"; i=1} {print} i && /^}/{print "#endif /* CONFIG_SCHED_WALT */"; i=0; d=1}' "$sf" > "$sf.tmp" && mv "$sf.tmp" "$sf"
+  echo "patched sysctl.c sched_boost_handler"
+fi
+
 # 5. build
 export PATH="$ROOT/clang/bin:$PATH"
 export ARCH=arm64 SUBARCH=arm64

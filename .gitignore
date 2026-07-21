@@ -1,0 +1,5 @@
+kernel/
+clang/
+*.zip
+anykernel/Image.gz-dtb
+.DS_Store

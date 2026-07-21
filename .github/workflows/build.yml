@@ -1,0 +1,66 @@
+name: Build ginkgo kernel 4.14.117
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+env:
+  KERNEL_REPO: https://github.com/MiCode/Xiaomi_Kernel_OpenSource
+  KERNEL_BRANCH: ginkgo-q-oss
+  DEFCONFIG: vendor/ginkgo-perf_defconfig
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout packaging repo
+        uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev make gcc \
+            git zip curl python3 libncurses-dev
+
+      - name: Clone kernel source (4.14.117 base)
+        run: git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
+
+      - name: Clone proton-clang toolchain
+        run: git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+
+      - name: Disable CONFIG_MODULE_SIG_FORCE
+        working-directory: kernel
+        run: |
+          cfg="arch/arm64/configs/$DEFCONFIG"
+          sed -i 's/^CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' "$cfg"
+          echo "----- module sig config after patch -----"
+          grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG" "$cfg" || true
+
+      - name: Build kernel
+        working-directory: kernel
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          export ARCH=arm64 SUBARCH=arm64
+          make O=out ARCH=arm64 "$DEFCONFIG"
+          make -j"$(nproc)" O=out ARCH=arm64 \
+            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
+            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            Image.gz-dtb
+
+      - name: Package flashable zip (AnyKernel3)
+        run: |
+          IMG=kernel/out/arch/arm64/boot/Image.gz-dtb
+          test -f "$IMG" || { echo "Image.gz-dtb not built"; exit 1; }
+          cp "$IMG" anykernel/Image.gz-dtb
+          cd anykernel
+          zip -r9 "../ginkgo-custom-4.14.117-$(date +%Y%m%d).zip" . -x ".git*"
+
+      - name: Upload flashable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ginkgo-custom-kernel-zip
+          path: ginkgo-custom-4.14.117-*.zip

@@ -62,9 +62,10 @@ jobs:
           # tentative symbols (yylloc). -fcommon restores merge behavior for host tools.
           HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
           make O=out ARCH=arm64 "$DEFCONFIG"
+          # CC=clang for compile, but link with GNU ld (from AOSP gcc): ld.lld rejects
+          # R_AARCH64_ABS32 relocs (EFI stub, MODVERSIONS __crc_*) in this 4.14 tree.
           make -j"$(nproc)" O=out ARCH=arm64 \
-            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
-            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
+            CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE="$GCC64" \
             CROSS_COMPILE_ARM32="$GCC32" \

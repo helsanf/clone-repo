@@ -51,12 +51,14 @@ cd kernel
 # host GCC 11+ defaults to -fno-common; 4.14 dtc has duplicate tentative symbols (yylloc)
 HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
 make O=out ARCH=arm64 "$DEFCONFIG"
-# CC=clang for compile, link with GNU ld (AOSP gcc): ld.lld rejects R_AARCH64_ABS32
+# compile: clang + AOSP gcc as + llvm binutils; link: GNU bfd ld (not lld → R_AARCH64_ABS32)
 make -j"$(nproc)" O=out ARCH=arm64 \
   CC=clang \
   CLANG_TRIPLE=aarch64-linux-gnu- \
   CROSS_COMPILE="$GCC64" \
   CROSS_COMPILE_ARM32="$GCC32" \
+  LD=aarch64-linux-gnu-ld.bfd \
+  AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
   HOSTCFLAGS="$HOSTCFLAGS" \
   Image.gz-dtb
 cd "$ROOT"

@@ -79,9 +79,15 @@ jobs:
           # goal: load module without a trusted signing key
           sed -i 's/^CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' "$cfg"
           # vermagic target "4.14.117-perf+" -> set LOCALVERSION=-perf (celtare ships
-          # "-pixel-Dyneteve"). MODVERSIONS kept ON so vermagic carries the same tokens
-          # as the .ko. the trailing "+" comes from setlocalversion (dirty git tree).
+          # "-pixel-Dyneteve"). trailing "+" comes from setlocalversion (dirty git tree).
           sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf"/' "$cfg"
+          # ld.lld rejects R_AARCH64_ABS32 from MODVERSIONS __crc_* and the EFI stub.
+          # MODVERSIONS off: also can't help the .ko load anyway (its CRCs come from a
+          #   different source tree), so drop it -> vermagic keys on the string alone.
+          # EFI off: Android boots via bootloader, not EFI (safe, no vermagic impact).
+          sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' "$cfg"
+          sed -i 's/^CONFIG_EFI=y/# CONFIG_EFI is not set/' "$cfg"
+          grep -q '^# CONFIG_EFI is not set$' "$cfg" || echo '# CONFIG_EFI is not set' >> "$cfg"
           # celtare leaves these int symbols unset (no Kconfig default) -> oldconfig would
           # prompt and CI has no stdin. ginkgo SD665: cores 0-3 little (0x0f=15), 4-7 big (0xf0=240).
           grep -q '^CONFIG_LITTLE_CPU_MASK=' "$cfg" || echo 'CONFIG_LITTLE_CPU_MASK=15' >> "$cfg"

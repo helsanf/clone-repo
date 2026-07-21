@@ -39,9 +39,13 @@ if [ ! -x gcc32/bin/arm-linux-androideabi-as ]; then rm -rf gcc32
 cfg="kernel/arch/arm64/configs/$DEFCONFIG"
 # load module without a trusted signing key
 sed -i 's/^CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' "$cfg"
-# vermagic target "4.14.117-perf+": set LOCALVERSION=-perf (celtare ships -pixel-Dyneteve).
-# MODVERSIONS kept ON; trailing "+" comes from setlocalversion (dirty git tree).
+# vermagic target "4.14.117-perf+": set LOCALVERSION=-perf; "+" from setlocalversion.
 sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf"/' "$cfg"
+# ld.lld rejects R_AARCH64_ABS32 from MODVERSIONS __crc_* and the EFI stub -> disable both.
+# (MODVERSIONS off wouldn't help the .ko load anyway; its CRCs are from another tree.)
+sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' "$cfg"
+sed -i 's/^CONFIG_EFI=y/# CONFIG_EFI is not set/' "$cfg"
+grep -q '^# CONFIG_EFI is not set$' "$cfg" || echo '# CONFIG_EFI is not set' >> "$cfg"
 # celtare leaves these int symbols unset (no default) -> oldconfig prompts (no CI stdin).
 # ginkgo SD665: cores 0-3 little (15), 4-7 big (240).
 grep -q '^CONFIG_LITTLE_CPU_MASK=' "$cfg" || echo 'CONFIG_LITTLE_CPU_MASK=15' >> "$cfg"

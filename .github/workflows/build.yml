@@ -1,4 +1,4 @@
-name: Build ginkgo kernel 4.14.117
+name: Build ginkgo kernel (Sakura .245, SIG off)
 
 on:
   workflow_dispatch:
@@ -6,15 +6,15 @@ on:
     branches: [ main ]
 
 env:
-  # AOSP ginkgo .117 (Kaname/celtare) — boots crDroid/LOS, unlike MIUI stock
-  KERNEL_REPO: https://github.com/celtare21/kernel_xiaomi_ginkgo
-  KERNEL_BRANCH: perf
+  # Sakura ginkgo branch "11" = 4.14.245, the kernel crDroid 11 (Android 11) uses.
+  # Proven to boot A11 -> no bootloop like celtare/MIUI (wrong-lineage) kernels.
+  KERNEL_REPO: https://github.com/Sakura-Devices/kernel_xiaomi_ginkgo
+  KERNEL_BRANCH: "11"
   DEFCONFIG: vendor/ginkgo-perf_defconfig
   CCACHE_DIR: /home/runner/.ccache
 
 jobs:
   build:
-    # ubuntu-22.04: older glibc (no DT_RELR/.relr.dyn) so proton's LLD can link host tools
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout packaging repo
@@ -26,8 +26,6 @@ jobs:
           sudo apt-get install -y bc bison flex libssl-dev make gcc \
             git zip curl python3 libncurses-dev ccache
 
-      # --- toolchains cached across runs; clones below are guarded so a cache
-      #     hit skips the multi-GB downloads. static key = same tools every run.
       - name: Cache toolchains (proton + AOSP gcc)
         uses: actions/cache@v4
         with:
@@ -37,112 +35,55 @@ jobs:
             gcc32
           key: toolchains-proton13-aospgcc49-v2
 
-      - name: Clone kernel source (4.14.117 base)
+      - name: Clone kernel source (Sakura .245)
         run: git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
 
       - name: Clone proton-clang (CC) [if not cached]
         run: |
-          # if cache miss OR restored dir is incomplete/lost exec bits, re-clone fresh.
-          # rm -rf first so `git clone` never hits "destination exists".
-          if [ ! -x clang/bin/clang ]; then
-            rm -rf clang
-            git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
-          fi
+          if [ ! -x clang/bin/clang ]; then rm -rf clang; git clone --depth=1 https://github.com/kdrag0n/proton-clang clang; fi
           chmod -R +x clang/bin || true
 
       - name: "Clone AOSP GCC 4.9 (GNU as/ld/binutils) [if not cached]"
-        # clang needs a GNU `as` that is aarch64 (not host x86); AOSP GCC 4.9 is era-matched.
         run: |
-          if [ ! -x gcc64/bin/aarch64-linux-android-as ]; then
-            rm -rf gcc64
-            git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 gcc64
-          fi
-          if [ ! -x gcc32/bin/arm-linux-androideabi-as ]; then
-            rm -rf gcc32
-            git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 gcc32
-          fi
+          if [ ! -x gcc64/bin/aarch64-linux-android-as ]; then rm -rf gcc64; git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 gcc64; fi
+          if [ ! -x gcc32/bin/arm-linux-androideabi-as ]; then rm -rf gcc32; git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 gcc32; fi
           chmod -R +x gcc64/bin gcc32/bin || true
-          echo "aarch64 as: $(gcc64/bin/aarch64-linux-android-as --version | head -1)"
 
-      # --- object cache; restores latest prefix, saves per-sha (even on failure)
       - name: Cache ccache
         uses: actions/cache@v4
         with:
           path: /home/runner/.ccache
-          key: ccache-ginkgo-${{ github.sha }}
-          restore-keys: ccache-ginkgo-
+          key: ccache-sakura-${{ github.sha }}
+          restore-keys: ccache-sakura-
 
-      - name: Patch defconfig (SIG_FORCE off, LOCALVERSION -perf)
+      - name: Patch defconfig (SIG_FORCE off, MODVERSIONS off, EFI off, FORCE_LOAD on)
         working-directory: kernel
         run: |
           cfg="arch/arm64/configs/$DEFCONFIG"
-          # goal: load module without a trusted signing key
+          # goal: load a module without a trusted signing key
           sed -i 's/^CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' "$cfg"
-          # vermagic target "4.14.117-perf+" -> set LOCALVERSION=-perf (celtare ships
-          # "-pixel-Dyneteve"). trailing "+" comes from setlocalversion (dirty git tree).
-          sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf"/' "$cfg"
           # ld.lld rejects R_AARCH64_ABS32 from MODVERSIONS __crc_* and the EFI stub.
-          # MODVERSIONS off: also can't help the .ko load anyway (its CRCs come from a
-          #   different source tree), so drop it -> vermagic keys on the string alone.
-          # EFI off: Android boots via bootloader, not EFI (safe, no vermagic impact).
           sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' "$cfg"
           sed -i 's/^CONFIG_EFI=y/# CONFIG_EFI is not set/' "$cfg"
           grep -q '^# CONFIG_EFI is not set$' "$cfg" || echo '# CONFIG_EFI is not set' >> "$cfg"
-          # celtare leaves these int symbols unset (no Kconfig default) -> oldconfig would
-          # prompt and CI has no stdin. ginkgo SD665: cores 0-3 little (0x0f=15), 4-7 big (0xf0=240).
-          grep -q '^CONFIG_LITTLE_CPU_MASK=' "$cfg" || echo 'CONFIG_LITTLE_CPU_MASK=15' >> "$cfg"
-          grep -q '^CONFIG_BIG_CPU_MASK='    "$cfg" || echo 'CONFIG_BIG_CPU_MASK=240'   >> "$cfg"
-          # legacy in-kernel lowmemorykiller fails to compile under modern clang and is
-          # redundant on Android 10 (userspace lmkd handles OOM). disable the driver.
-          sed -i 's/^CONFIG_ANDROID_LOW_MEMORY_KILLER=y/# CONFIG_ANDROID_LOW_MEMORY_KILLER is not set/' "$cfg"
-          # tune.c cftype table references *_wrapper funcs gated on CONFIG_STUNE_ASSIST but
-          # calls them unconditionally -> undeclared-identifier build error when it is off.
-          # celtare expects it ON; enable it (deps SCHED_TUNE+ANDROID already satisfied).
-          grep -q '^CONFIG_STUNE_ASSIST=y' "$cfg" || echo 'CONFIG_STUNE_ASSIST=y' >> "$cfg"
-          # the target .ko carries a 'modversions' vermagic + CRCs from a source tree we
-          # don't have -> normal insmod would reject on token+CRC mismatch. FORCE_LOAD lets
-          # `insmod -f` bypass both vermagic and CRC checks so the module can load.
+          # let `insmod -f` load the target .ko despite vermagic/CRC mismatch
           grep -q '^CONFIG_MODULE_FORCE_LOAD=y' "$cfg" || echo 'CONFIG_MODULE_FORCE_LOAD=y' >> "$cfg"
           echo "----- config after patch -----"
-          grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=|CPU_MASK" "$cfg" || true
-
-      - name: Patch source (dedupe sched_boost_handler under WALT)
-        working-directory: kernel
-        run: |
-          # celtare defines sched_boost_handler in BOTH boost.c (built when SCHED_WALT=y)
-          # and sysctl.c (always) -> ld.lld "duplicate symbol". guard the sysctl.c copy so
-          # it only compiles when WALT is off; the header extern keeps sysctl tables valid.
-          f=kernel/sysctl.c
-          need=$(awk 'p=="#ifndef CONFIG_SCHED_WALT" && /^int sched_boost_handler\(/{print "no";exit} /^int sched_boost_handler\(/{print "yes";exit} {p=$0}' "$f")
-          if [ "$need" = "yes" ]; then
-            awk '/^int sched_boost_handler\(/ && !d{print "#ifndef CONFIG_SCHED_WALT"; i=1} {print} i && /^}/{print "#endif /* CONFIG_SCHED_WALT */"; i=0; d=1}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
-            echo "patched: guarded sysctl.c sched_boost_handler"
-          else
-            echo "already guarded, skip"
-          fi
-          grep -n -A1 '^#ifndef CONFIG_SCHED_WALT' "$f" | grep -A1 -B1 sched_boost_handler || true
+          grep -E "MODULE_SIG_FORCE|MODVERSIONS|CONFIG_EFI|MODULE_FORCE_LOAD|LOCALVERSION=|CPU_MASK" "$cfg" || true
 
       - name: Build kernel
         working-directory: kernel
         run: |
-          # NOTE: do NOT create .scmversion here — we WANT setlocalversion to append
-          # the "+" so vermagic reads "4.14.117-perf+" (matches the target .ko).
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           export ARCH=arm64 SUBARCH=arm64
           export CCACHE_MAXSIZE=3G CCACHE_COMPILERCHECK=content
-          ccache -z >/dev/null 2>&1 || true
           GCC64="$GITHUB_WORKSPACE/gcc64/bin/aarch64-linux-android-"
           GCC32="$GITHUB_WORKSPACE/gcc32/bin/arm-linux-androideabi-"
-          # host GCC 11+ defaults to -fno-common; 4.14's bundled dtc has duplicate
-          # tentative symbols (yylloc). -fcommon restores merge behavior for host tools.
+          # host GCC 11+ -fno-common breaks 4.14's bundled dtc (yylloc) -> -fcommon
           HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
           make O=out ARCH=arm64 "$DEFCONFIG"
-          # resolve any new/unset symbols to defaults non-interactively (celtare defconfig
-          # isn't fully resolved -> otherwise silentoldconfig prompts and CI has no stdin)
           make O=out ARCH=arm64 HOSTCFLAGS="$HOSTCFLAGS" olddefconfig
-          # compile: clang(+ccache) + AOSP gcc assembler + llvm binutils; link: ld.lld.
-          # celtare is a real AOSP clang+lld tree, so it links as-is (no MODVERSIONS/EFI
-          # workarounds needed like the MIUI stock source).
+          # compile: clang(+ccache) + AOSP gcc assembler + llvm binutils; link: ld.lld
           make -j"$(nproc)" O=out ARCH=arm64 \
             CC="ccache clang" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -160,10 +101,10 @@ jobs:
           test -f "$IMG" || { echo "Image.gz-dtb not built"; exit 1; }
           cp "$IMG" anykernel/Image.gz-dtb
           cd anykernel
-          zip -r9 "../ginkgo-custom-4.14.117-$(date +%Y%m%d).zip" . -x ".git*"
+          zip -r9 "../ginkgo-sakura-4.14.245-$(date +%Y%m%d).zip" . -x ".git*"
 
       - name: Upload flashable zip
         uses: actions/upload-artifact@v4
         with:
-          name: ginkgo-custom-kernel-zip
-          path: ginkgo-custom-4.14.117-*.zip
+          name: ginkgo-sakura-kernel-zip
+          path: ginkgo-sakura-4.14.245-*.zip

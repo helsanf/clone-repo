@@ -5,7 +5,7 @@
 ## AnyKernel setup
 # begin properties
 properties() { '
-kernel.string=Ginkgo Custom 4.14.117-perf (AOSP, SIG_FORCE off)
+kernel.string=Ginkgo Sakura 4.14.245 (crDroid 11, SIG_FORCE off + FORCE_LOAD)
 do.devicecheck=1
 do.modules=0
 do.systemless=1

@@ -1,35 +1,30 @@
 #!/usr/bin/env bash
-# Local build (Linux / WSL only — NOT macOS).
-# Produces a flashable AnyKernel3 zip for Redmi Note 8 (ginkgo), kernel 4.14.117,
-# with CONFIG_MODULE_SIG_FORCE disabled.
+# Local build (Linux / WSL, Ubuntu 22.04 recommended — NOT macOS).
+# Builds Sakura ginkgo kernel (4.14.245, the crDroid 11 kernel) with
+# CONFIG_MODULE_SIG_FORCE off + CONFIG_MODULE_FORCE_LOAD on, packaged as a
+# flashable AnyKernel3 zip. Boots crDroid 11 (Android 11); load the target
+# .ko with `insmod -f` (force, bypasses vermagic/CRC).
 set -euo pipefail
 
-# AOSP ginkgo .117 (Kaname/celtare) — boots crDroid/LOS, unlike MIUI stock
-KERNEL_REPO="https://github.com/celtare21/kernel_xiaomi_ginkgo"
-KERNEL_BRANCH="perf"
+KERNEL_REPO="https://github.com/Sakura-Devices/kernel_xiaomi_ginkgo"
+KERNEL_BRANCH="11"
 DEFCONFIG="vendor/ginkgo-perf_defconfig"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-# 0. sanity
 [ "$(uname -s)" = "Linux" ] || { echo "Run on Linux/WSL, not $(uname -s)."; exit 1; }
 
-# NOTE: use an older distro (e.g. Ubuntu 22.04 / glibc 2.35). On newer glibc
-# (DT_RELR/.relr.dyn) proton's LLD fails to link host tools like fixdep.
-
-# 1. deps (Debian/Ubuntu)
+# 1. deps
 if command -v apt-get >/dev/null; then
   sudo apt-get update
-  sudo apt-get install -y bc bison flex libssl-dev make gcc git zip curl python3 libncurses-dev
+  sudo apt-get install -y bc bison flex libssl-dev make gcc git zip curl python3 libncurses-dev ccache
 fi
 
-# 2. kernel source (4.14.117 base)
+# 2. kernel source
 [ -d kernel ] || git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
 
-# 3a. CC toolchain: proton-clang (rm+clone if missing/incomplete, avoids "dest exists")
+# 3. toolchains
 if [ ! -x clang/bin/clang ]; then rm -rf clang
   git clone --depth=1 https://github.com/kdrag0n/proton-clang clang; fi
-
-# 3b. GNU binutils: AOSP GCC 4.9 (clang needs an aarch64 GNU `as`, not host x86)
 if [ ! -x gcc64/bin/aarch64-linux-android-as ]; then rm -rf gcc64
   git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 gcc64; fi
 if [ ! -x gcc32/bin/arm-linux-androideabi-as ]; then rm -rf gcc32
@@ -37,50 +32,23 @@ if [ ! -x gcc32/bin/arm-linux-androideabi-as ]; then rm -rf gcc32
 
 # 4. patch defconfig
 cfg="kernel/arch/arm64/configs/$DEFCONFIG"
-# load module without a trusted signing key
 sed -i 's/^CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' "$cfg"
-# vermagic target "4.14.117-perf+": set LOCALVERSION=-perf; "+" from setlocalversion.
-sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf"/' "$cfg"
-# ld.lld rejects R_AARCH64_ABS32 from MODVERSIONS __crc_* and the EFI stub -> disable both.
-# (MODVERSIONS off wouldn't help the .ko load anyway; its CRCs are from another tree.)
 sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' "$cfg"
 sed -i 's/^CONFIG_EFI=y/# CONFIG_EFI is not set/' "$cfg"
 grep -q '^# CONFIG_EFI is not set$' "$cfg" || echo '# CONFIG_EFI is not set' >> "$cfg"
-# celtare leaves these int symbols unset (no default) -> oldconfig prompts (no CI stdin).
-# ginkgo SD665: cores 0-3 little (15), 4-7 big (240).
-grep -q '^CONFIG_LITTLE_CPU_MASK=' "$cfg" || echo 'CONFIG_LITTLE_CPU_MASK=15' >> "$cfg"
-grep -q '^CONFIG_BIG_CPU_MASK='    "$cfg" || echo 'CONFIG_BIG_CPU_MASK=240'   >> "$cfg"
-# legacy lowmemorykiller fails under modern clang; redundant on A10 (userspace lmkd)
-sed -i 's/^CONFIG_ANDROID_LOW_MEMORY_KILLER=y/# CONFIG_ANDROID_LOW_MEMORY_KILLER is not set/' "$cfg"
-# tune.c calls *_wrapper funcs gated on CONFIG_STUNE_ASSIST unconditionally -> enable it
-grep -q '^CONFIG_STUNE_ASSIST=y' "$cfg" || echo 'CONFIG_STUNE_ASSIST=y' >> "$cfg"
-# allow `insmod -f` to load the target .ko despite modversions/CRC mismatch
 grep -q '^CONFIG_MODULE_FORCE_LOAD=y' "$cfg" || echo 'CONFIG_MODULE_FORCE_LOAD=y' >> "$cfg"
 echo "----- config after patch -----"
-grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=|CPU_MASK" "$cfg" || true
-
-# 4b. dedupe sched_boost_handler: defined in both boost.c (WALT) and sysctl.c -> ld.lld
-#     duplicate symbol. guard the sysctl.c copy for the WALT-off case only.
-sf="kernel/kernel/sysctl.c"
-need=$(awk 'p=="#ifndef CONFIG_SCHED_WALT" && /^int sched_boost_handler\(/{print "no";exit} /^int sched_boost_handler\(/{print "yes";exit} {p=$0}' "$sf")
-if [ "$need" = "yes" ]; then
-  awk '/^int sched_boost_handler\(/ && !d{print "#ifndef CONFIG_SCHED_WALT"; i=1} {print} i && /^}/{print "#endif /* CONFIG_SCHED_WALT */"; i=0; d=1}' "$sf" > "$sf.tmp" && mv "$sf.tmp" "$sf"
-  echo "patched sysctl.c sched_boost_handler"
-fi
+grep -E "MODULE_SIG_FORCE|MODVERSIONS|CONFIG_EFI|MODULE_FORCE_LOAD|LOCALVERSION=" "$cfg" || true
 
 # 5. build
 export PATH="$ROOT/clang/bin:$PATH"
 export ARCH=arm64 SUBARCH=arm64
 GCC64="$ROOT/gcc64/bin/aarch64-linux-android-"
 GCC32="$ROOT/gcc32/bin/arm-linux-androideabi-"
-cd kernel
-# do NOT create .scmversion — we WANT the "+" so vermagic reads "4.14.117-perf+"
-# host GCC 11+ defaults to -fno-common; 4.14 dtc has duplicate tentative symbols (yylloc)
 HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
+cd kernel
 make O=out ARCH=arm64 "$DEFCONFIG"
-# resolve unset symbols to defaults non-interactively (avoid silentoldconfig prompt)
 make O=out ARCH=arm64 HOSTCFLAGS="$HOSTCFLAGS" olddefconfig
-# compile: clang + AOSP gcc as + llvm binutils; link: ld.lld (celtare AOSP tree links as-is)
 make -j"$(nproc)" O=out ARCH=arm64 \
   CC=clang \
   CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -96,5 +64,5 @@ cd "$ROOT"
 IMG="kernel/out/arch/arm64/boot/Image.gz-dtb"
 [ -f "$IMG" ] || { echo "build failed: $IMG missing"; exit 1; }
 cp "$IMG" anykernel/Image.gz-dtb
-( cd anykernel && zip -r9 "../ginkgo-custom-4.14.117-$(date +%Y%m%d).zip" . -x ".git*" )
-echo "DONE: $ROOT/ginkgo-custom-4.14.117-$(date +%Y%m%d).zip"
+( cd anykernel && zip -r9 "../ginkgo-sakura-4.14.245-$(date +%Y%m%d).zip" . -x ".git*" )
+echo "DONE: $ROOT/ginkgo-sakura-4.14.245-$(date +%Y%m%d).zip"

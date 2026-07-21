@@ -60,7 +60,7 @@ jobs:
           key: ccache-ginkgo-${{ github.sha }}
           restore-keys: ccache-ginkgo-
 
-      - name: Patch defconfig (SIG_FORCE off, MODVERSIONS off)
+      - name: Patch defconfig (SIG_FORCE off, MODVERSIONS off, EFI off)
         working-directory: kernel
         run: |
           cfg="arch/arm64/configs/$DEFCONFIG"
@@ -70,8 +70,15 @@ jobs:
           # relocation" at link. drop MODVERSIONS: module load then keys off vermagic
           # only (still "4.14.117-perf"), CRC check skipped. source==stock so ABI matches.
           sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' "$cfg"
-          echo "----- module config after patch -----"
-          grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG|CONFIG_MODVERSIONS" "$cfg" || true
+          # EFI stub emits R_AARCH64_ABS32 (__efistub_stext_offset) that ld.lld rejects.
+          # Android boots via bootloader, not EFI -> disabling it is safe and removes the reloc.
+          if grep -q '^CONFIG_EFI=y' "$cfg"; then
+            sed -i 's/^CONFIG_EFI=y/# CONFIG_EFI is not set/' "$cfg"
+          else
+            echo '# CONFIG_EFI is not set' >> "$cfg"
+          fi
+          echo "----- config after patch -----"
+          grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_EFI" "$cfg" || true
 
       - name: Build kernel
         working-directory: kernel
@@ -90,13 +97,14 @@ jobs:
           HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
           make O=out ARCH=arm64 "$DEFCONFIG"
           # compile: clang(+ccache) + AOSP gcc assembler + llvm binutils
-          # link: GNU bfd ld (proton) — lld rejects R_AARCH64_ABS32 in this 4.14 tree
+          # link: ld.lld (mainstream for ginkgo). ABS32 sources removed via
+          #       MODVERSIONS off (__crc_*) + EFI off (__efistub_*).
           make -j"$(nproc)" O=out ARCH=arm64 \
             CC="ccache clang" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE="$GCC64" \
             CROSS_COMPILE_ARM32="$GCC32" \
-            LD=aarch64-linux-gnu-ld.bfd \
+            LD=ld.lld \
             AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
             HOSTCFLAGS="$HOSTCFLAGS" \
             Image.gz-dtb

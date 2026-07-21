@@ -41,8 +41,15 @@ sed -i 's/^CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' "$cf
 # genksyms fails to CRC some msm gsi symbols under clang -> "dangerous relocation".
 # drop MODVERSIONS: load keys off vermagic only (still 4.14.117-perf), CRC skipped.
 sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' "$cfg"
-echo "----- module config after patch -----"
-grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG|CONFIG_MODVERSIONS" "$cfg" || true
+# EFI stub emits R_AARCH64_ABS32 (__efistub_*) that ld.lld rejects; Android boots via
+# bootloader not EFI, so disabling it is safe and removes the reloc.
+if grep -q '^CONFIG_EFI=y' "$cfg"; then
+  sed -i 's/^CONFIG_EFI=y/# CONFIG_EFI is not set/' "$cfg"
+else
+  echo '# CONFIG_EFI is not set' >> "$cfg"
+fi
+echo "----- config after patch -----"
+grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_EFI" "$cfg" || true
 
 # 5. build
 export PATH="$ROOT/clang/bin:$PATH"
@@ -55,13 +62,13 @@ cd kernel
 # host GCC 11+ defaults to -fno-common; 4.14 dtc has duplicate tentative symbols (yylloc)
 HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
 make O=out ARCH=arm64 "$DEFCONFIG"
-# compile: clang + AOSP gcc as + llvm binutils; link: GNU bfd ld (not lld → R_AARCH64_ABS32)
+# compile: clang + AOSP gcc as + llvm binutils; link: ld.lld (ABS32 sources removed via MODVERSIONS/EFI off)
 make -j"$(nproc)" O=out ARCH=arm64 \
   CC=clang \
   CLANG_TRIPLE=aarch64-linux-gnu- \
   CROSS_COMPILE="$GCC64" \
   CROSS_COMPILE_ARM32="$GCC32" \
-  LD=aarch64-linux-gnu-ld.bfd \
+  LD=ld.lld \
   AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
   HOSTCFLAGS="$HOSTCFLAGS" \
   Image.gz-dtb

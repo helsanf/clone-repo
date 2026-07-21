@@ -4,8 +4,9 @@
 # with CONFIG_MODULE_SIG_FORCE disabled.
 set -euo pipefail
 
-KERNEL_REPO="https://github.com/MiCode/Xiaomi_Kernel_OpenSource"
-KERNEL_BRANCH="ginkgo-q-oss"
+# AOSP ginkgo .117 (Kaname/celtare) — boots crDroid/LOS, unlike MIUI stock
+KERNEL_REPO="https://github.com/celtare21/kernel_xiaomi_ginkgo"
+KERNEL_BRANCH="perf"
 DEFCONFIG="vendor/ginkgo-perf_defconfig"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
@@ -36,20 +37,13 @@ fi
 
 # 4. patch defconfig
 cfg="kernel/arch/arm64/configs/$DEFCONFIG"
-# load stock vendor .ko without a trusted signing key
+# load module without a trusted signing key
 sed -i 's/^CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' "$cfg"
-# genksyms fails to CRC some msm gsi symbols under clang -> "dangerous relocation".
-# drop MODVERSIONS: load keys off vermagic only (still 4.14.117-perf), CRC skipped.
-sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' "$cfg"
-# EFI stub emits R_AARCH64_ABS32 (__efistub_*) that ld.lld rejects; Android boots via
-# bootloader not EFI, so disabling it is safe and removes the reloc.
-if grep -q '^CONFIG_EFI=y' "$cfg"; then
-  sed -i 's/^CONFIG_EFI=y/# CONFIG_EFI is not set/' "$cfg"
-else
-  echo '# CONFIG_EFI is not set' >> "$cfg"
-fi
+# vermagic target "4.14.117-perf+": set LOCALVERSION=-perf (celtare ships -pixel-Dyneteve).
+# MODVERSIONS kept ON; trailing "+" comes from setlocalversion (dirty git tree).
+sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf"/' "$cfg"
 echo "----- config after patch -----"
-grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_EFI" "$cfg" || true
+grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=" "$cfg" || true
 
 # 5. build
 export PATH="$ROOT/clang/bin:$PATH"
@@ -57,12 +51,11 @@ export ARCH=arm64 SUBARCH=arm64
 GCC64="$ROOT/gcc64/bin/aarch64-linux-android-"
 GCC32="$ROOT/gcc32/bin/arm-linux-androideabi-"
 cd kernel
-# keep vermagic "4.14.117-perf" (no trailing "+") so stock vendor modules match
-: > .scmversion
+# do NOT create .scmversion — we WANT the "+" so vermagic reads "4.14.117-perf+"
 # host GCC 11+ defaults to -fno-common; 4.14 dtc has duplicate tentative symbols (yylloc)
 HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
 make O=out ARCH=arm64 "$DEFCONFIG"
-# compile: clang + AOSP gcc as + llvm binutils; link: ld.lld (ABS32 sources removed via MODVERSIONS/EFI off)
+# compile: clang + AOSP gcc as + llvm binutils; link: ld.lld (celtare AOSP tree links as-is)
 make -j"$(nproc)" O=out ARCH=arm64 \
   CC=clang \
   CLANG_TRIPLE=aarch64-linux-gnu- \

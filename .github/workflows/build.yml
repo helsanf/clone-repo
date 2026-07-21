@@ -6,8 +6,9 @@ on:
     branches: [ main ]
 
 env:
-  KERNEL_REPO: https://github.com/MiCode/Xiaomi_Kernel_OpenSource
-  KERNEL_BRANCH: ginkgo-q-oss
+  # AOSP ginkgo .117 (Kaname/celtare) — boots crDroid/LOS, unlike MIUI stock
+  KERNEL_REPO: https://github.com/celtare21/kernel_xiaomi_ginkgo
+  KERNEL_BRANCH: perf
   DEFCONFIG: vendor/ginkgo-perf_defconfig
   CCACHE_DIR: /home/runner/.ccache
 
@@ -60,32 +61,24 @@ jobs:
           key: ccache-ginkgo-${{ github.sha }}
           restore-keys: ccache-ginkgo-
 
-      - name: Patch defconfig (SIG_FORCE off, MODVERSIONS off, EFI off)
+      - name: Patch defconfig (SIG_FORCE off, LOCALVERSION -perf)
         working-directory: kernel
         run: |
           cfg="arch/arm64/configs/$DEFCONFIG"
-          # load stock vendor .ko without a trusted signing key
+          # goal: load module without a trusted signing key
           sed -i 's/^CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' "$cfg"
-          # genksyms fails to CRC some msm gsi symbols under clang -> "dangerous
-          # relocation" at link. drop MODVERSIONS: module load then keys off vermagic
-          # only (still "4.14.117-perf"), CRC check skipped. source==stock so ABI matches.
-          sed -i 's/^CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' "$cfg"
-          # EFI stub emits R_AARCH64_ABS32 (__efistub_stext_offset) that ld.lld rejects.
-          # Android boots via bootloader, not EFI -> disabling it is safe and removes the reloc.
-          if grep -q '^CONFIG_EFI=y' "$cfg"; then
-            sed -i 's/^CONFIG_EFI=y/# CONFIG_EFI is not set/' "$cfg"
-          else
-            echo '# CONFIG_EFI is not set' >> "$cfg"
-          fi
+          # vermagic target "4.14.117-perf+" -> set LOCALVERSION=-perf (celtare ships
+          # "-pixel-Dyneteve"). MODVERSIONS kept ON so vermagic carries the same tokens
+          # as the .ko. the trailing "+" comes from setlocalversion (dirty git tree).
+          sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf"/' "$cfg"
           echo "----- config after patch -----"
-          grep -E "CONFIG_MODULES|CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_EFI" "$cfg" || true
+          grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=|CONFIG_LOCALVERSION_AUTO" "$cfg" || true
 
       - name: Build kernel
         working-directory: kernel
         run: |
-          # empty .scmversion suppresses the trailing "+" from setlocalversion,
-          # so vermagic stays "4.14.117-perf" and matches stock vendor modules
-          : > .scmversion
+          # NOTE: do NOT create .scmversion here — we WANT setlocalversion to append
+          # the "+" so vermagic reads "4.14.117-perf+" (matches the target .ko).
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           export ARCH=arm64 SUBARCH=arm64
           export CCACHE_MAXSIZE=3G CCACHE_COMPILERCHECK=content
@@ -96,9 +89,9 @@ jobs:
           # tentative symbols (yylloc). -fcommon restores merge behavior for host tools.
           HOSTCFLAGS="-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon"
           make O=out ARCH=arm64 "$DEFCONFIG"
-          # compile: clang(+ccache) + AOSP gcc assembler + llvm binutils
-          # link: ld.lld (mainstream for ginkgo). ABS32 sources removed via
-          #       MODVERSIONS off (__crc_*) + EFI off (__efistub_*).
+          # compile: clang(+ccache) + AOSP gcc assembler + llvm binutils; link: ld.lld.
+          # celtare is a real AOSP clang+lld tree, so it links as-is (no MODVERSIONS/EFI
+          # workarounds needed like the MIUI stock source).
           make -j"$(nproc)" O=out ARCH=arm64 \
             CC="ccache clang" \
             CLANG_TRIPLE=aarch64-linux-gnu- \

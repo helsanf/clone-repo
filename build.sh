@@ -54,6 +54,8 @@ grep -q '^CONFIG_BIG_CPU_MASK='    "$cfg" || echo 'CONFIG_BIG_CPU_MASK=240'   >>
 sed -i 's/^CONFIG_ANDROID_LOW_MEMORY_KILLER=y/# CONFIG_ANDROID_LOW_MEMORY_KILLER is not set/' "$cfg"
 # tune.c calls *_wrapper funcs gated on CONFIG_STUNE_ASSIST unconditionally -> enable it
 grep -q '^CONFIG_STUNE_ASSIST=y' "$cfg" || echo 'CONFIG_STUNE_ASSIST=y' >> "$cfg"
+# allow `insmod -f` to load the target .ko despite modversions/CRC mismatch
+grep -q '^CONFIG_MODULE_FORCE_LOAD=y' "$cfg" || echo 'CONFIG_MODULE_FORCE_LOAD=y' >> "$cfg"
 echo "----- config after patch -----"
 grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=|CPU_MASK" "$cfg" || true
 

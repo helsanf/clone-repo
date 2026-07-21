@@ -99,6 +99,10 @@ jobs:
           # calls them unconditionally -> undeclared-identifier build error when it is off.
           # celtare expects it ON; enable it (deps SCHED_TUNE+ANDROID already satisfied).
           grep -q '^CONFIG_STUNE_ASSIST=y' "$cfg" || echo 'CONFIG_STUNE_ASSIST=y' >> "$cfg"
+          # the target .ko carries a 'modversions' vermagic + CRCs from a source tree we
+          # don't have -> normal insmod would reject on token+CRC mismatch. FORCE_LOAD lets
+          # `insmod -f` bypass both vermagic and CRC checks so the module can load.
+          grep -q '^CONFIG_MODULE_FORCE_LOAD=y' "$cfg" || echo 'CONFIG_MODULE_FORCE_LOAD=y' >> "$cfg"
           echo "----- config after patch -----"
           grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=|CPU_MASK" "$cfg" || true
 

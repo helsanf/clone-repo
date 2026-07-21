@@ -42,8 +42,12 @@ sed -i 's/^CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' "$cf
 # vermagic target "4.14.117-perf+": set LOCALVERSION=-perf (celtare ships -pixel-Dyneteve).
 # MODVERSIONS kept ON; trailing "+" comes from setlocalversion (dirty git tree).
 sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf"/' "$cfg"
+# celtare leaves these int symbols unset (no default) -> oldconfig prompts (no CI stdin).
+# ginkgo SD665: cores 0-3 little (15), 4-7 big (240).
+grep -q '^CONFIG_LITTLE_CPU_MASK=' "$cfg" || echo 'CONFIG_LITTLE_CPU_MASK=15' >> "$cfg"
+grep -q '^CONFIG_BIG_CPU_MASK='    "$cfg" || echo 'CONFIG_BIG_CPU_MASK=240'   >> "$cfg"
 echo "----- config after patch -----"
-grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=" "$cfg" || true
+grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=|CPU_MASK" "$cfg" || true
 
 # 5. build
 export PATH="$ROOT/clang/bin:$PATH"

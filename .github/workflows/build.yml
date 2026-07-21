@@ -82,8 +82,12 @@ jobs:
           # "-pixel-Dyneteve"). MODVERSIONS kept ON so vermagic carries the same tokens
           # as the .ko. the trailing "+" comes from setlocalversion (dirty git tree).
           sed -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-perf"/' "$cfg"
+          # celtare leaves these int symbols unset (no Kconfig default) -> oldconfig would
+          # prompt and CI has no stdin. ginkgo SD665: cores 0-3 little (0x0f=15), 4-7 big (0xf0=240).
+          grep -q '^CONFIG_LITTLE_CPU_MASK=' "$cfg" || echo 'CONFIG_LITTLE_CPU_MASK=15' >> "$cfg"
+          grep -q '^CONFIG_BIG_CPU_MASK='    "$cfg" || echo 'CONFIG_BIG_CPU_MASK=240'   >> "$cfg"
           echo "----- config after patch -----"
-          grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=|CONFIG_LOCALVERSION_AUTO" "$cfg" || true
+          grep -E "CONFIG_MODULE_SIG|CONFIG_MODVERSIONS|CONFIG_LOCALVERSION=|CPU_MASK" "$cfg" || true
 
       - name: Build kernel
         working-directory: kernel
